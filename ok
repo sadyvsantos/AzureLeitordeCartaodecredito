@@ -1,0 +1,99 @@
+.env
+ENDPOINT = “Colocar o endereço url criado no Azure.”
+SUBSCRIPTION_KEY = “Colocar a chave criado no Azure referente a url.”
+AZURE_STORAGE_CONNECTION_STRING = “Colocar todo o link criado referente no Azure, url e chave.”
+CONTAINER_NAME = “Nome da instância.”
+
+src\requirements.txt
+#Se não tiver instalado as configurações, basta ir no terminal e digitar o comando: pip install -r requirements.txt
+azure.core
+azure-ai-documentintelligence
+streamlit
+azure-storage-blob
+python-dotenv
+
+
+src\utils\config.py
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+class Config:
+ENDPOINT = os.getenv(“ENDPOINT”)
+KEY = os.getenv(“SUBSCRIPTION_KEY”)
+AZURE_STORAGE_CONNECTION_STRING = os.getenv(“AZURE_STORAGE_CONNECTION_STRING”)
+CONTAINER_NAME = os.getenv(“CONTAINER_NAME”)
+
+
+src\app.py
+import streamlit as st
+from services.blob_service import upload_blob
+from services.credit_card_service import analize_credit_card
+
+def configure_interface():
+	st.title(“Upload de arquivo”)
+	uploaded_file = st.file_uploader(“Escolha um arquivo”, type=[“png”, “jpg”, “jpeg”])
+
+	if uploader_file is not None:
+		fileName = uploader_file.name
+		# Enviar para o blob storage
+		blob_url = upload_blob(uploaded_file, fileName)
+		if blob_url:
+			st.write(f”Arquivo {fileName} enviado com sucesso para o Azure Blob Storage.”)
+			credit_card_info = analize_credit_card(blob_url)
+			Show_image_and_validation(blob_url, credit_card_info)
+		else:
+			st.write(f”Erro ao enviar o arquivo {fileName} para o Azure Blob Storage.”)
+		
+def show_image_and_validation(blob_url, credit_card_info):
+	st.image(blob_url, caption=”Imagem enviada.”, use_column_width=True)
+	st.write(“Resultado da validação:”)
+	if credit_card_info and credit_card_info[“card_name”]:
+		st.markdown(f“<h1 style=’color: red;’>Cartão Válido</h1>”, unsafe_allow_html=True)
+		st.write(f“Nome do Titular: {credit_card_info[‘card_name’]}”)
+		st.write(f“Banco Emissor: { credit_card_info [‘bank_name’]}”)
+		st.write(f“Data de Validade: { credit_card_info [‘expiry_date’]}”)
+	else:
+		st.markdown(f“<h1 style=’color: red;’>Cartão Inválido</h1>”, unsafe_allow_html=True)
+		st.write(“Este não é um cartão de crédito válido.”)
+if __name__ == “__main__”:
+	configure_interface()
+
+
+src\services\blob_service.py
+import os
+import streamlit as st
+from utils.Config import Config
+from azure.storage.blob import BlobServiceClient
+
+def upload_blob(file, file_name):
+	try:
+		blob_service_client = BlobServiceClient.from_connection_string(Config.AZURE_STORAGE_CONNECTION_STRING)
+		blob_client = blob_service_client.get_blob_client(container=Config.CONTAINER_NAME, blob=file_name)
+		blob_client.upload_blob(file, overwritr=True)
+		return blob_client.url
+	except Exception as ex:
+		st.error(f”Erro ao enviar o arquivo para o Azure Blob Storage: {ex}”)
+		return None
+
+
+src\services\credit_card_service.py
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.documentintelligence import DocumentIntelligenceCliente
+from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+from util.Config import Config
+
+def analize_credit_card(card_url):
+	credential = AzureKeyCredential(Config.KEY)
+	document_Client = DocumentIntelligenceClient(Config.ENDPOINT, credential)
+	card_info = document_Client.begin_analyze_document(“prebuilt-creditCard”, AnalyzeDocumentRequest(url_source=card_url))
+	result = card_info.result()
+
+	for document in result.documents:
+		fields = document.get(‘fields’, {})
+		return{
+			“card_name”: fields.gets(‘CardHolderName’, {}).get(‘content’),
+			“card_number”: fields.gets(‘CardNumber’, {}).get(‘content’),
+			“expiry_date”: fields.gets(‘ExpirationDate’, {}).get(‘content’),
+			“bank_name”: fields.gets(‘IssuingBank’, {}).get(‘content’),
+}
